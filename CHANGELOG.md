@@ -1,5 +1,79 @@
 # Change Log
 
+## [1.3.18]
+
+* Fix clipboardy/webpack issue - breaking release 1.3.17 (#1355)
+
+Contributors: hsubramanianaks, anime-shed , kejatura-dev, ReinierCC, Also, an FYI, so suppress work will stay as it is.: qpetraroia, corneliusroemer, okgolove, tejhan, gambtho, squillace, metaphy6 , verhelstq  Thank you all!!
+
+## [1.3.17]
+
+* feat: add an option to disable Helm channel output (#1208)
+* dependabot PR's
+* Remove old site scaffolding project and Update/package dependencies (#1277)
+* Added snippet for ReplicaSet (#1268)
+* Prune and upgrade npm package dependencies (#1265)
+* Use vscode-single-select instead of vscode-select (#1294)
+* Fix the ubuntu failure. (#1279)
+
+Contributors: dbreyfogle, okgolove, peterbom, mikeseese, Thank you all!!
+
+## [1.3.16]
+
+* Hide convert context menu (#1244)
+* Test fixes. (#1242)
+
+Contributors: timheuer, Thank you all!!
+
+## [1.3.15]
+
+* Revert killTree changes. Detail discussion here https://github.com/vscode-kubernetes-tools/vscode-kubernetes-tools/issues/1216
+
+Contributors: mikeseese, peterbom, michaellzc, mfilipe-te Thank you all!!
+
+## [1.3.14]
+
+* Fix tool path configuration handling. (#1192)
+* No more kubectl logs (#1195)
+* Added snippet for CronJob (#1201)
+* Include missing bracket pairs to helm language configuration (#1198)
+* Kill the entire process tree instead of just the process (#1204)
+* Create a more responsive/adaptive layout for the log view (#1205)
+
+Contributors: lstocchi, mikeseese, sergiogarciadev, aceat64, juozasg, a544jh, Thank you all!!
+
+## [1.3.13]
+
+* Trim container name and filter empty ones.
+
+Contributors: lstocchi
+
+## [1.3.12]
+
+* Debug attach not working with go app
+* Detect errors in yaml file before actually parse it with node-yaml-parser lib
+* Retrieve tool paths outside kubernetes object and update README
+* Handle predefined vscode variables in extension setting
+* Add setting to suppress helm not found warning
+* Handle ANSI color codes in log webview
+* Fix/cluster tree label issue
+* Migrate from k8s.gcr.io to registry.k8s.io
+* Added notReady and completed pod status
+* Add inline buttons for describe, logs, and terminal
+* Fix logs webview jumps back when scrolling up (#1113)
+
+Contributors: lstocchi, jamesorlakin, carljmosca, shikharcodes, Tatsinnit
+
+## [1.3.11]
+
+* Cache minikube show information responce
+* Set debug session name to pod name on attach
+* Fix to use asWebviewUri to convert webview scripts path
+* Document Fix dependency extension name
+* Change licence to Apache 2
+
+Contributors: Tatsinnit, WBrettDavis, lstocchi, orgads, itowlson
+
 ## [1.3.10]
 
 * Use XDG Base Directory variables when creating the base installation directory

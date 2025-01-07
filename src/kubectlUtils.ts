@@ -57,6 +57,7 @@ export interface PodInfo extends KubernetesObject {
     readonly namespace: string;
     readonly nodeName: string;
     readonly status: string;
+    readonly ready: string;
 }
 
 export interface ClusterConfig {
@@ -327,6 +328,7 @@ export async function getPods(kubectl: Kubectl, selector: any, namespace: string
             nodeName: item.node,
             status: item.status,
             metadata: { name: item.name, namespace: item.namespace || ns },
+            ready: item.ready
         };
     });
 }
@@ -457,7 +459,7 @@ export async function waitForRunningPod(kubectl: Kubectl, podName: string): Prom
 }
 
 function isTransientPodState(status: string): boolean {
-    return status === "ContainerCreating" || status === "Pending" || status === "Succeeded";
+    return status === "ContainerCreating" || status === "Pending" || status === "Succeeded" || status.startsWith("Init");
 }
 
 /**
