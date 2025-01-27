@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
 import { Host } from '../../host';
 import { Shell, Platform } from '../../shell';
 import { Dictionary } from '../../utils/dictionary';
+import { getCacheExpirationDate } from '../clusterprovider/common/cacheinfo';
+import { interpolateVariables } from '../../utils/interpolation';
 
 const EXTENSION_CONFIG_KEY = "vs-kubernetes";
 const KUBECONFIG_PATH_KEY = "vs-kubernetes.kubeconfig";
@@ -79,6 +81,10 @@ export function getKnownKubeconfigs(): string[] {
     if (!kkcConfig || !kkcConfig.length) {
         return [];
     }
+    (kkcConfig as string[]).forEach((value, index) => {
+        const interpolatedValue = interpolateVariables(value);
+        kkcConfig[index] = interpolatedValue;
+    });
     return kkcConfig as string[];
 }
 
@@ -92,8 +98,8 @@ export async function setActiveKubeconfig(kubeconfig: string): Promise<void> {
     await addPathToConfig(KUBECONFIG_PATH_KEY, kubeconfig);
 }
 
-export function getActiveKubeconfig(): string {
-    return vscode.workspace.getConfiguration(EXTENSION_CONFIG_KEY)[KUBECONFIG_PATH_KEY];
+export function getActiveKubeconfig(): string | undefined {
+    return interpolateVariables(vscode.workspace.getConfiguration(EXTENSION_CONFIG_KEY)[KUBECONFIG_PATH_KEY]);
 }
 
 // Functions for working with tool paths
@@ -104,7 +110,7 @@ export function getToolPath(_host: Host, shell: Shell, tool: string): string | u
     const config = vscode.workspace.getConfiguration();
 
     const baseBackCompatKey = toolPathBackCompatBaseKey(tool);
-    const osBackCompatKey = osOverrideKey(os, baseBackCompatKey);
+    const osBackCompatKey = osBackCompatOverrideKey(os, baseBackCompatKey);
     const backCompatSettings = config.inspect<Dictionary<any>>(EXTENSION_CONFIG_KEY) || Dictionary.of<any>();
     const wsFolderValues = backCompatSettings.workspaceFolderValue || {};
     const wsValues = backCompatSettings.workspaceValue || {};
@@ -132,10 +138,12 @@ export function getToolPath(_host: Host, shell: Shell, tool: string): string | u
     const topLevelToolPath =
         userValues[osKey] ||
         defaultValues[osKey] ||
+        config.get(osKey) ||
         userValues[baseKey] ||
-        defaultValues[baseKey];
+        defaultValues[baseKey] ||
+        config.get(baseKey);
 
-    return topLevelToolPath || globalBackCompatSetting;
+    return interpolateVariables(topLevelToolPath || globalBackCompatSetting);
 }
 
 export function toolPathOSKey(os: Platform, tool: string): string {
@@ -152,9 +160,14 @@ function toolPathNewBaseKey(tool: string): string {
     return `vscode-kubernetes.${tool}-path`;
 }
 
+function osBackCompatOverrideKey(os: Platform, baseKey: string): string {
+    const osKey = osKeyString(os);
+    return osKey ? `${baseKey}.${osKey}` : baseKey;
+}
+
 function osOverrideKey(os: Platform, baseKey: string): string {
     const osKey = osKeyString(os);
-    return osKey ? `${baseKey}.${osKey}` : baseKey;  // The 'else' clause should never happen so don't worry that this would result in double-checking a missing base key
+    return osKey ? `${baseKey}-${osKey}` : baseKey;  // The 'else' clause should never happen so don't worry that this would result in double-checking a missing base key
 }
 
 function osKeyString(os: Platform): string | null {
@@ -195,7 +208,7 @@ export function getUseWsl(): boolean {
 }
 
 // minikube check upgrade
-const  MK_CHECK_UPGRADE_KEY = 'checkForMinikubeUpgrade';
+const MK_CHECK_UPGRADE_KEY = 'checkForMinikubeUpgrade';
 
 export function getCheckForMinikubeUpgrade(): boolean {
     return vscode.workspace.getConfiguration(EXTENSION_CONFIG_KEY)[MK_CHECK_UPGRADE_KEY];
@@ -231,8 +244,8 @@ export function getNodejsAutoDetectRemoteRoot(): boolean {
     return vscode.workspace.getConfiguration(EXTENSION_CONFIG_KEY)['vs-kubernetes.nodejs-autodetect-remote-root'];
 }
 // user specified root location of the source code in the container
-export function getNodejsRemoteRoot(): string {
-    return vscode.workspace.getConfiguration(EXTENSION_CONFIG_KEY)['vs-kubernetes.nodejs-remote-root'];
+export function getNodejsRemoteRoot(): string | undefined {
+    return interpolateVariables(vscode.workspace.getConfiguration(EXTENSION_CONFIG_KEY)['vs-kubernetes.nodejs-remote-root']);
 }
 // remote debugging port for nodejs. Usually 9229
 export function getNodejsDebugPort(): number | undefined {
@@ -252,8 +265,8 @@ export function getPythonAutoDetectRemoteRoot(): boolean {
 }
 
 // user specified root location of the source code in the container
-export function getPythonRemoteRoot(): string {
-    return vscode.workspace.getConfiguration(EXTENSION_CONFIG_KEY)['vs-kubernetes.python-remote-root'];
+export function getPythonRemoteRoot(): string | undefined {
+    return interpolateVariables(vscode.workspace.getConfiguration(EXTENSION_CONFIG_KEY)['vs-kubernetes.python-remote-root']);
 }
 
 // remote debugging port for Python. Usually 5678
@@ -262,8 +275,8 @@ export function getPythonDebugPort(): number | undefined {
 }
 
 // remote debugging path to dotnet debugger (vsdbg)
-export function getDotnetVsdbgPath(): string {
-    return vscode.workspace.getConfiguration(EXTENSION_CONFIG_KEY)['vs-kubernetes.dotnet-vsdbg-path'];
+export function getDotnetVsdbgPath(): string | undefined {
+    return interpolateVariables(vscode.workspace.getConfiguration(EXTENSION_CONFIG_KEY)['vs-kubernetes.dotnet-vsdbg-path']);
 }
 
 // remote debugging sourceFileMap for dotnet. An entry "sourceFileMap": {"<vs-kubernetes.dotnet-source-file-map>":"$workspaceFolder"} will be added to the debug configuration
@@ -306,13 +319,17 @@ export function getLocalTunnelDebugProvider(): string | undefined {
     return vscode.workspace.getConfiguration(EXTENSION_CONFIG_KEY)['vs-kubernetes.local-tunnel-debug-provider'];
 }
 
-// if true will enable the minimal describe workflow
-export function isMinimalDescribeWorkflow(): boolean {
-    return vscode.workspace.getConfiguration(EXTENSION_CONFIG_KEY)['vs-kubernetes.enable-minimal-describe-workflow'];
+// if true will enable a minimal workflow when selecting resources
+export function isMinimalWorkflow(): boolean {
+    return vscode.workspace.getConfiguration(EXTENSION_CONFIG_KEY)['vs-kubernetes.enable-minimal-workflow'];
 }
 
 export function suppressKubectlNotFound(): boolean {
     return vscode.workspace.getConfiguration(EXTENSION_CONFIG_KEY)['vs-kubernetes.suppress-kubectl-not-found-alerts'];
+}
+
+export function suppressHelmNotFound(): boolean {
+    return vscode.workspace.getConfiguration(EXTENSION_CONFIG_KEY)['vs-kubernetes.suppress-helm-not-found-alerts'];
 }
 
 export function ignoreK8sRecommendations(): boolean {
@@ -326,6 +343,19 @@ export function getCRDCodeCompletionState(): string | undefined {
 export function setCRDCodeCompletion(enable: boolean): void {
     const value = (enable) ? 'enabled' : 'disabled';
     setConfigValue('vs-kubernetes.crd-code-completion', value);
+}
+
+export function supressOutput(): boolean {
+    return vscode.workspace.getConfiguration(EXTENSION_CONFIG_KEY)['vs-kubernetes.supress-output'];
+}
+
+export function getMinikubeShowInfoState(): string | undefined {
+    return vscode.workspace.getConfiguration(EXTENSION_CONFIG_KEY)['vs-kubernetes.minikube-show-information-expiration'];
+}
+
+export function setMinikubeShowInfo(selectedoption: string): void {
+    const storedValue = getCacheExpirationDate(selectedoption);
+    setConfigValue('vs-kubernetes.minikube-show-information-expiration', storedValue);
 }
 
 export function isLogViewerFollowEnabled(): boolean {

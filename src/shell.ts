@@ -160,9 +160,10 @@ function execCore(cmd: string, opts: any, callback?: ((proc: ChildProcess) => vo
         if (getUseWsl()) {
             cmd = 'wsl ' + cmd;
         }
+        opts['silent'] = true;
         const proc = shelljs.exec(cmd, opts, (code, stdout, stderr) => resolve({code : code, stdout : stdout, stderr : stderr}));
         if (stdin) {
-            proc.stdin.end(stdin);
+            proc.stdin?.end(stdin);
         }
         if (callback) {
             callback(proc);

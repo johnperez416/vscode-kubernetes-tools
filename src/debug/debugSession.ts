@@ -22,6 +22,7 @@ import { Dictionary } from "../utils/dictionary";
 import { definedOf } from "../utils/array";
 import * as imageUtils from "../image/imageUtils";
 import { ExecResult } from "../binutilplusplus";
+import { interpolateVariables } from "../utils/interpolation";
 
 const debugCommandDocumentationUrl = "https://github.com/Azure/vscode-kubernetes-tools/blob/master/debug-on-kubernetes.md";
 
@@ -73,7 +74,7 @@ export class DebugSession implements IDebugSession {
         }
 
         const cwd = workspaceFolder.uri.fsPath;
-        const imagePrefix = vscode.workspace.getConfiguration().get<string | null>("vsdocker.imageUser", null);
+        const imagePrefix = interpolateVariables(vscode.workspace.getConfiguration().get("vsdocker.imageUser", undefined));
         const containerEnv = Dictionary.of<string>();
         const portInfo = await this.debugProvider.resolvePortsFromFile(dockerfile, containerEnv);
         const debugArgs = await this.debugProvider.getDebugArgs();
@@ -91,7 +92,7 @@ export class DebugSession implements IDebugSession {
         }
 
         vscode.window.withProgress({ location: vscode.ProgressLocation.Window }, async (p) => {
-            let appName;
+            let appName: string | undefined;
             try {
                 // Build/push docker image.
                 p.report({ message: "Building Docker image..."});
@@ -121,7 +122,10 @@ export class DebugSession implements IDebugSession {
 
                 // Start debug session.
                 p.report({ message: `Starting ${this.debugProvider!.getDebuggerType()} debug session...`});  // safe because checked outside the lambda
-                await this.startDebugSession(appName, cwd, proxyResult, podName, undefined);
+                await this.startDebugSession(appName, cwd, proxyResult, podName, undefined, async () => {
+                    kubeChannel.showOutput("The debug session exited.");
+                    await this.promptForCleanup(`deployment/${appName}`);
+                });
             } catch (error) {
                 vscode.window.showErrorMessage(error);
                 kubeChannel.showOutput(`Debug on Kubernetes failed. The errors were: ${error}.`);
@@ -196,7 +200,7 @@ export class DebugSession implements IDebugSession {
                 // Start debug session.
                 p.report({ message: `Starting ${this.debugProvider!.getDebuggerType()} debug session...`});  // safe because checked outside lambda
 
-                await this.startDebugSession(undefined, workspaceFolder.uri.fsPath, proxyResult, targetPod, pidToDebug);
+                await this.startDebugSession(targetPod, workspaceFolder.uri.fsPath, proxyResult, targetPod, pidToDebug, async () => {});
             } catch (error) {
                 vscode.window.showErrorMessage(error);
                 kubeChannel.showOutput(`Debug on Kubernetes failed. The errors were: ${error}.`);
@@ -350,9 +354,8 @@ export class DebugSession implements IDebugSession {
         return proxyResult;
     }
 
-    private async startDebugSession(appName: string | undefined, cwd: string, proxyResult: ProxyResult | undefined, pod: string, pidToDebug: number | undefined): Promise<void> {
+    private async startDebugSession(sessionName: string, cwd: string, proxyResult: ProxyResult | undefined, pod: string, pidToDebug: number | undefined, onTerminateCallback: () => Promise<any>): Promise<void> {
         kubeChannel.showOutput("Starting debug session...", "Start debug session");
-        const sessionName = appName || `${Date.now()}`;
 
         const proxyDebugPort = proxyResult ? proxyResult.proxyDebugPort : undefined;
         const proxyAppPort = proxyResult ? proxyResult.proxyAppPort : undefined;
@@ -361,10 +364,7 @@ export class DebugSession implements IDebugSession {
             if (proxyResult && proxyResult.proxyProcess) {
                 proxyResult.proxyProcess.kill();
             }
-            if (appName) {
-                kubeChannel.showOutput("The debug session exited.");
-                await this.promptForCleanup(`deployment/${appName}`);
-            }
+            await onTerminateCallback();
         });
     }
 
@@ -434,7 +434,7 @@ export class DebugSession implements IDebugSession {
         return new Promise<void>((resolve, reject) => {
             let isProxyReady = false;
 
-            proxyProcess.stdout.on('data', async (data) => {
+            proxyProcess.stdout?.on('data', async (data) => {
                 const message = `${data}`;
                 if (!isProxyReady && this.isForwardingCompleteMessage(message)) {
                     isProxyReady = true;
@@ -442,7 +442,7 @@ export class DebugSession implements IDebugSession {
                 }
             });
 
-            proxyProcess.stderr.on('data', (data) => {
+            proxyProcess.stderr?.on('data', (data) => {
                 kubeChannel.showOutput(`${data}`, "port-forward");
             });
 
