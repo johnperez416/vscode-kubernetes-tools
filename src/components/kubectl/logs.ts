@@ -104,7 +104,7 @@ export async function getLogsForContainer(
     }
 
     if (containerName) {
-        args.push(`--container=${containerName}`);
+        args.push(`--container=${containerName.trim()}`);
     }
 
     if (displayMode === LogsDisplayMode.Follow) {
@@ -181,7 +181,7 @@ async function logsForPod(kubectl: Kubectl): Promise<void> {
 async function logsForPodFromOpenDocument(kubectl: Kubectl, editor: vscode.TextEditor) {
     const text = editor.document.getText();
     try {
-        const obj: {} = yaml.safeLoad(text);
+        const obj: unknown = yaml.load(text);
         if (isPod(obj)) {
             // document describes a pod.
             const podSummary = {

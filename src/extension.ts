@@ -88,6 +88,7 @@ import { getCurrentContext } from './kubectlUtils';
 import { LocalTunnelDebugger } from './components/localtunneldebugger/localtunneldebugger';
 import { setAssetContext } from './assets';
 import { fixOldInstalledBinaryPermissions } from './components/installer/fixwriteablebinaries';
+import { interpolateVariables } from './utils/interpolation';
 
 let explainActive = false;
 let swaggerSpecPromise: Promise<explainer.SwaggerModel | undefined> | null = null;
@@ -460,7 +461,7 @@ function provideHoverJson(document: vscode.TextDocument, position: vscode.Positi
 
 function provideHoverYaml(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken): Promise<vscode.Hover | null> {
     const syntax: Syntax = {
-        parse: (text) => yaml.safeLoad(text),
+        parse: (text) => yaml.load(text),
         findParent: (document, parentLine) => findParentYaml(document, parentLine)
     };
     return provideHover(document, position, token, syntax);
@@ -767,7 +768,8 @@ function loadKubernetesCore(namespace: string | null, value: string) {
 }
 
 async function exposeKubernetes() {
-    const kindName = await findKindNameOrPrompt(kuberesources.exposableKinds, 'expose', { nameOptional: false});
+    const isMinimalWorkflow = config.isMinimalWorkflow();
+    const kindName = await findKindNameOrPrompt(kuberesources.exposableKinds, 'expose', { nameOptional: false, skipFreeTextPrompt: isMinimalWorkflow});
     if (!kindName) {
         return;
     }
@@ -799,7 +801,8 @@ async function getKubernetes(explorerNode?: any) {
         const nsarg = (node.nodeType === explorer.NODE_TYPES.resource && node.namespace) ? `--namespace ${node.namespace}` : '';
         kubectl.invokeInSharedTerminal(`get ${id} ${nsarg} -o wide`);
     } else {
-        const value = await findKindNameOrPrompt(kuberesources.commonKinds, 'get', { nameOptional: true });
+        const isMinimalWorkflow = config.isMinimalWorkflow();
+        const value = await findKindNameOrPrompt(kuberesources.commonKinds, 'get', { nameOptional: true, skipFreeTextPrompt: isMinimalWorkflow });
         if (value) {
             kubectl.invokeInSharedTerminal(` get ${value} -o wide`);
         }
@@ -913,7 +916,7 @@ function findNameAndImageInternal(fn: (name: string, image: string) => void) {
     const name = docker.sanitiseTag(folderName);
     findVersion().then((version) => {
         let image = `${name}:${version}`;
-        const user = vscode.workspace.getConfiguration().get("vsdocker.imageUser", null);
+        const user = interpolateVariables(vscode.workspace.getConfiguration().get("vsdocker.imageUser", undefined));
         if (user) {
             image = `${user}/${image}`;
         }
@@ -927,7 +930,8 @@ async function scaleKubernetes(target?: any) {
         const kindName = target.kindName;
         promptScaleKubernetes(kindName);
     } else {
-        const kindName = await findKindNameOrPrompt(kuberesources.scaleableKinds, 'scale', {});
+        const isMinimalWorkflow = config.isMinimalWorkflow();
+        const kindName = await findKindNameOrPrompt(kuberesources.scaleableKinds, 'scale', { skipFreeTextPrompt: isMinimalWorkflow });
         if (kindName) {
             promptScaleKubernetes(kindName);
         }
@@ -966,7 +970,7 @@ function runKubernetes() {
 
 function diagnosePushError(_exitCode: number, error: string): string {
     if (error.includes("denied")) {
-        const user = vscode.workspace.getConfiguration().get("vsdocker.imageUser", null);
+        const user = interpolateVariables(vscode.workspace.getConfiguration().get("vsdocker.imageUser", undefined));
         if (user) {
             return "Failed pushing the image to remote registry. Try to login to an image registry.";
         } else {
@@ -1043,7 +1047,7 @@ function findKindNameForText(text: string): Errorable<ResourceKindName> {
 
 function findKindNamesForText(text: string): Errorable<ResourceKindName[]> {
     try {
-        const objs: {}[] = yaml.safeLoadAll(text);
+        const objs: unknown[] = yaml.loadAll(text);
         if (objs.some((o) => !isKubernetesResource(o))) {
             if (objs.length === 1) {
                 return { succeeded: false, error: ['the open document is not a Kubernetes resource'] };
@@ -1082,13 +1086,18 @@ export async function findKindNameOrPrompt(resourceKinds: kuberesources.Resource
 export async function promptKindName(resourceKinds: kuberesources.ResourceKind[], descriptionVerb: string, opts: vscode.InputBoxOptions & QuickPickKindNameOptions): Promise<string | undefined> {
     let placeHolder: string = 'Empty string to be prompted';
     let prompt: string = `What resource do you want to ${descriptionVerb}?`;
+    let skipFreeTextPrompt = false;
 
     if (opts) {
         placeHolder = opts.placeHolder || placeHolder;
         prompt = opts.prompt || prompt;
+        skipFreeTextPrompt = opts.skipFreeTextPrompt || skipFreeTextPrompt;
     }
 
-    const resource = await vscode.window.showInputBox({ prompt, placeHolder});
+    let resource: string | undefined = '';
+    if (!skipFreeTextPrompt) {
+        resource = await vscode.window.showInputBox({ prompt, placeHolder});
+    }
 
     if (resource === '') {
         return await quickPickKindName(resourceKinds, opts);
@@ -1186,29 +1195,6 @@ function parseName(line: string): string {
     return line.split(' ')[0];
 }
 
-async function getContainers(resource: ContainerContainer): Promise<Container[] | undefined> {
-    const q = shell.isWindows() ? `'` : `"`;
-    const lit = (l: string) => `{${q}${l}${q}}`;
-    const query = `${lit("NAME\\tIMAGE\\n")}{range ${resource.containersQueryPath}.containers[*]}{.name}${lit("\\t")}{.image}${lit("\\n")}{end}`;
-    const queryArg = shell.isWindows() ? `"${query}"` : `'${query}'`;
-    let cmd = `get ${resource.kindName} -o jsonpath=${queryArg}`;
-    if (resource.namespace && resource.namespace.length > 0) {
-        cmd += ' --namespace=' + resource.namespace;
-    }
-    const containers = await kubectl.asLines(cmd);
-    if (failed(containers)) {
-        vscode.window.showErrorMessage("Failed to get containers in resource: " + containers.error[0]);
-        return undefined;
-    }
-
-    const containersEx = containers.result.map((s) => {
-        const bits = s.split('\t');
-        return { name: bits[0], image: bits[1] };
-    });
-
-    return containersEx;
-}
-
 enum PodSelectionFallback {
     None,
     AnyPod,
@@ -1279,7 +1265,7 @@ async function describeKubernetes(explorerNode?: ClusterExplorerResourceNode) {
     } else {
         let resourceKinds;
         let skipFreeTextPrompt;
-        const isMinimalDescribeWorkflow = config.isMinimalDescribeWorkflow();
+        const isMinimalDescribeWorkflow = config.isMinimalWorkflow();
         if (isMinimalDescribeWorkflow) {
             resourceKinds = kuberesources.commonKinds;
             skipFreeTextPrompt = false;
@@ -1369,6 +1355,47 @@ async function selectContainerForResource(resource: ContainerContainer): Promise
     }
 
     return value.container;
+}
+
+async function getContainers(resource: ContainerContainer): Promise<Container[] | undefined> {
+
+    const containersEx: Container[] = [];
+
+    const initContainers = await getContainerQuery(resource, 'initContainers');
+    if (initContainers) {
+        initContainers.map((s) => { containersEx.push(s)});
+    }
+    const containers = await getContainerQuery(resource, 'containers');
+    if (containers) {
+        containers.map((s) => { containersEx.push(s)});
+    }
+    if (containersEx.length) {
+        return containersEx;
+    }
+    return undefined;
+}
+
+async function getContainerQuery(resource: ContainerContainer, containerType: string): Promise<Container[] | undefined> {
+    const q = shell.isWindows() ? `'` : `"`;
+    const lit = (l: string) => `{${q}${l}${q}}`;
+    const query = `${lit("NAME\\tIMAGE\\n")}\
+    {range ${resource.containersQueryPath}.${containerType}[*]}{.name}${lit("\\t")}{.image}${lit("\\n")}{end}`;
+    const queryArg = shell.isWindows() ? `"${query}"` : `'${query}'`;
+    let cmd = `get ${resource.kindName} -o jsonpath=${queryArg}`;
+    if (resource.namespace && resource.namespace.length > 0) {
+        cmd += ' --namespace=' + resource.namespace;
+    }
+    const c = await kubectl.asLines(cmd);
+    if (failed(c)) {
+        vscode.window.showErrorMessage("Failed to get containers in resource: " + c.error[0]);
+        return undefined;
+    }
+    const containersEx = c.result.map((s) => {
+        const bits = s.split('\t');
+        return { name: bits[0] ? bits[0].trim() : '', image: bits[1] ? bits[1].trim() : '', initContainer: containerType === 'initContainers'};
+    });
+
+    return containersEx.filter(c => c.name !== '');
 }
 
 export async function getContainersForResource(resource: ContainerContainer): Promise<Container[] | null> {
@@ -1519,7 +1546,8 @@ async function deleteKubernetes(delMode: KubernetesDeleteMode, explorerNode?: Cl
         const execResult = await kubectl.invokeCommandWithFeedback(`delete ${explorerNode.kindName} ${nsarg} ${delModeArg}`, `Deleting ${explorerNode.kindName}...`);
         await reportDeleteResult(explorerNode.kindName, execResult);
     } else {
-        const kindName = await promptKindName(kuberesources.commonKinds, 'delete', { nameOptional: true });
+        const isMinimalWorkflow = config.isMinimalWorkflow();
+        const kindName = await promptKindName(kuberesources.commonKinds, 'delete', { nameOptional: true, skipFreeTextPrompt: isMinimalWorkflow });
         if (kindName) {
             let commandArgs = kindName;
             if (!containsName(kindName)) {
@@ -1640,7 +1668,7 @@ const applyKubernetes = () => {
     });
 };
 
-const handleError = (err: NodeJS.ErrnoException) => {
+const handleError = (err: NodeJS.ErrnoException | null) => {
     if (err) {
         vscode.window.showErrorMessage(err.message);
     }
@@ -2069,7 +2097,7 @@ async function deleteContextKubernetes(explorerNode: ClusterExplorerNode) {
 async function copyKubernetes(explorerNode: ClusterExplorerNode) {
     const name = copiableName(explorerNode);
     if (name) {
-        clipboard.write(name);
+        clipboard.copyTextToClipboard(name);
     }
 }
 
