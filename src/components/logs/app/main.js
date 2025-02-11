@@ -1,4 +1,6 @@
 const vscode = acquireVsCodeApi();
+const Convert = require('ansi-to-html');
+const convert = new Convert();
 
 const CHRONO_UNITS = [
     { symbol: 'h', seconds: 3600 },
@@ -24,7 +26,7 @@ window.addEventListener('message', (event) => {
             const { containers, colors } = message;
             schemaColors = JSON.parse(colors);
             if (containers.length === 1) {
-                defaultContainer = containers[0];
+                defaultContainer = containers[0].name;
                 return;
             }
 
@@ -32,20 +34,18 @@ window.addEventListener('message', (event) => {
             containersPanel.classList.remove('display-none');
             containersPanel.classList.add('display-inline-block');
 
-            const select = createElement('vscode-select');
+            const select = createElement('vscode-single-select');
             select.setAttribute('id', 'containers-select');
             // eslint-disable-next-line @typescript-eslint/prefer-for-of
             for (let i = 0; i < containers.length; i += 1) {
-                const option = createElement('vscode-option', containers[i], containers[i]);
-                if (i === 0) {
-                    option.setAttribute('selected', '');
-                }
+                const option = createElement('vscode-option', containers[i].name,
+                    (containers[i].initContainer ? containers[i].name + ' (init)' : containers[i].name));
                 select.appendChild(option);
             }
             containersPanel.appendChild(select);
         }
         case 'content': {
-            const text = message.text.replace(/\n$/, '');
+            const text = message.text?.replace(/\n$/, '');
             if (!text) {
                 return;
             }
@@ -123,8 +123,9 @@ function debounce(func, wait, immediate) {
 
 function createElement(type, value, content) {
     const element = document.createElement(type);
-    if (value) { element.value = value; }
+    if (value) { element.setAttribute('value', value); }
     if (content) { element.textContent = content; }
+
     return element;
 }
 
@@ -235,7 +236,6 @@ function resetFilter() {
 function runFilter() {
     emptyContent();
     saveFilteredContent();
-    setHeightContentPanel();
     renderByPagination();
 }
 
@@ -310,7 +310,6 @@ function clear() {
         resetContent();
         resetFilter();
     }
-    setHeightContentPanel(true);
     emptyContent();
 }
 
@@ -339,20 +338,8 @@ function updateContent(newContent) {
     }
 
     content = saveFilteredContent(content);
-    setHeightContentPanel();
     renderByPagination(content);
     switchClass('clearBtn', 'display-none', 'display-inline-block');
-}
-
-function setHeightContentPanel(removeStyle) {
-    if (removeStyle) {
-        document.getElementById('innerLogPanel').style.removeProperty('height');
-    } else {
-        const content = isFiltering() ? filteredContent : fullPageContent;
-        const rows = Object.keys(content).length;
-        const heightDiv = getDefaultDivHeightValue();
-        document.getElementById('innerLogPanel').style.height = `${heightDiv * rows}px`;
-    }
 }
 
 function saveFilteredContent(content) {
@@ -503,13 +490,12 @@ function renderByPagination(contentToAdd) {
                 removeChildren(upperRange + 1, uppestRowInDOM);
                 upperRange = lowestRowInDOM - 1;
                 isPrepend = true;
-                document.getElementById('content').style.top = `${lowerRange * heightDiv}px`;
             } else {
                 emptyContent();
-                document.getElementById('content').style.top = `${lowerRange * heightDiv}px`;
             }
             const content = extractRowsToDraw(fullFilteredContent, lowerRange, upperRange);
             render(beautifyLines(content), lowerRange, isPrepend);
+            document.getElementById('content').style.top = `${lowerRange * heightDiv}px`;
         } else if (upperRange > uppestRowInDOM) {
             if (lowerRange <= uppestRowInDOM) {
                 removeChildren(lowestRowInDOM, lowerRange - 1);
@@ -562,6 +548,7 @@ function highlightWords(row) {
         return row;
     }
 
+    row = convert.toHtml(row);
     for (const rule of schemaColors) {
         const regexp = new RegExp(rule.regex, "gi");
         if (regexp.test(row)) {
